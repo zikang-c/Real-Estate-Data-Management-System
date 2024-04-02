@@ -1,8 +1,9 @@
 import streamlit as st
 import base64
-from backend_v8 import insert_property, search_property, filter_property, update_property, delete_property
+from backend_v11 import insert_property, search_property, update_property, delete_property
 from PIL import Image
 import bcrypt
+from io import BytesIO
 from pymongo import MongoClient
 
 
@@ -20,9 +21,7 @@ ACCEPTED_IMAGE_TYPES = ['jpg', 'png']
 
 
 # MongoDB connection setup
-with open('credentials.json') as f:
-    data = json.load(f)
-    MONGO_URI = data['url']
+MONGO_URI = 'mongodb+srv://nguyenlamvu88:Keepyou0ut99!!@cluster0.ymo3tge.mongodb.net/?retryWrites=true&w=majority'
 client = MongoClient(MONGO_URI)
 
 # Database and collection names
@@ -84,17 +83,16 @@ def registration_ui():
                 st.sidebar.error("Username and password cannot be empty.")
 
 
-                st.sidebar.error("Username and password cannot be empty.")
-
-
 def image_to_base64(image_path):
     """
     Convert an image file to a base64 string.
     """
-    with open(
-            r"C:\Users\nguye\OneDrive\Desktop\A serene and luxurious scene capturing a rich life by a tropical beach.jpg",
-            "rb") as img_file:
-        return base64.b64encode(img_file.read()).decode('utf-8')
+    try:
+        with open(image_path, "rb") as img_file:
+            return base64.b64encode(img_file.read()).decode('utf-8')
+    except Exception as e:
+        st.error(f"Error reading image file: {e}")
+        return None
 
 
 def display_logo(logo_path):
@@ -102,24 +100,55 @@ def display_logo(logo_path):
     Display the company logo and title in the Streamlit app.
     """
     logo_base64 = image_to_base64(logo_path)
-    logo_html = f"<img src='data:image/jpg;base64,{logo_base64}' class='img-fluid' width='150'>"
-    st.markdown(f"""
-    <div style="display: flex; align-items: center;">
-        {logo_html}
-        <h1 style="margin: 0 0 0 10px;">Majestic Real Estate Management</h1>
-    </div>
-    <div class="space"></div>
+    if logo_base64:
+        logo_html = f"<img src='data:image/jpg;base64,{logo_base64}' class='img-fluid' width='350'>"
+        st.markdown(f"""
+            <div style="display: flex; align-items: center;">
+                {logo_html}
+                <h1 style="margin: 0 0 0 50px;">Majestic Real Estate Management</h1>
+            </div>
+            <div class="space"></div>
+            """, unsafe_allow_html=True)
+    else:
+        st.error("Failed to display logo.")
 
-    """, unsafe_allow_html=True)
 
-
-def convert_image_to_base64(uploaded_image):
+def convert_image_to_base64(uploaded_image, size=(600, 400)):
     """
     Convert an uploaded image to a base64 string for storage.
     """
-    buffer = uploaded_image.read()
-    b64_encoded = base64.b64encode(buffer).decode()
-    return f"data:image/{uploaded_image.type.split('/')[-1]};base64,{b64_encoded}"
+    try:
+        # Extract file extension from filename and normalize to uppercase
+        filename = uploaded_image.name
+        file_extension = filename.split(".")[-1].lower()  # Ensure extension is in lowercase
+        if file_extension not in ['jpg', 'png']:
+            raise ValueError("Invalid file type")
+
+        # Open the uploaded image with PIL
+        image = Image.open(uploaded_image)
+
+        # Resize the image
+        resized_image = image.resize(size)
+
+        # Save the resized image to a buffer, specifying format explicitly
+        buffer = BytesIO()
+        format = 'JPEG' if file_extension == 'jpg' else file_extension.upper()
+        resized_image.save(buffer, format=format)  # Use explicit format
+        buffer.seek(0)
+
+        # Convert the image in the buffer to a base64 string
+        b64_encoded = base64.b64encode(buffer.read()).decode()
+
+        return f"data:image/{file_extension};base64,{b64_encoded}"
+    except Exception as e:
+        st.error(f"An error occurred while converting image to base64: {e}")
+        return None
+
+
+def display_image_in_base64(base64_string):
+    st.markdown(
+        f"<img src='{base64_string}' class='img-fluid'>", unsafe_allow_html=True
+    )
 
 
 def add_property_ui():
@@ -174,96 +203,60 @@ def add_property_ui():
 
 def search_property_ui():
     """
-    UI for searching properties based on basic criteria such as Custom ID, Address, or Type.
-    Returns a list of properties that match the search criteria.
-
-    :return: A list of dictionaries, each representing a property that matches the search criteria.
+    UI component for searching properties with optional sorting by price.
     """
-    st.subheader("🔍 Search for a Property")
-    search_results = []  # Initialize an empty list to store search results
+    st.subheader("🔍 Search for Properties")
+    # UI for search criteria
+    with st.form("search_form"):
+        city = st.text_input("City")
+        st.caption("case-insensitive")  # Add a caption under the "City" input field
 
-    with st.form(key='search_property_form'):
-        search_by = st.radio("Search by", ["Custom ID", "Address", "Type"])
+        state = st.text_input("State")
+        st.caption("case-insensitive")  # Add a caption under the "State" input field
 
-        # Adjust captions based on the selected search criteria
-        if search_by == "Type":
-            st.caption("For Type, please enter 'sale' or 'rent'. Case-insensitive.")
-        elif search_by == "Address":
-            st.caption("For Address, partial matches are allowed. Case-insensitive.")
-        elif search_by == "Custom ID":
-            st.caption("Custom ID requires exact match and case-sensitive.")
+        property_type = st.text_input("Type")
+        st.caption("sale or rent, case-insensitive")  # Add a caption under the "Type" input field
 
-        search_value = st.text_input("Enter Search Value")
-        submit_search = st.form_submit_button(label='Search')
+        address = st.text_input("Address")
+        st.caption("partial match allowed, case-insensitive")  # Add a caption under the "Address" input field
 
-        if submit_search:
-            try:
-                if search_by == "Custom ID":
-                    search_results = search_property(custom_id=search_value)
-                elif search_by == "Address":
-                    search_results = search_property(address=search_value)
-                else:  # Search by Type
-                    search_results = search_property(property_type=search_value.lower())
+        custom_id = st.text_input("Custom ID")
+        sort_by_price = st.selectbox("Sort by Price", ["None", "Ascending", "Descending"], index=0)
 
-                # Optionally display search results here or handle display elsewhere
-                if search_results:
-                    st.write("### Search Results Found:")
-                    for result in search_results:
-                        with st.expander(f"See details for {result.get('address', 'No Details')}"):
-                            st.json(result)  # Display the property details in JSON format
-                            if result.get('images'):
-                                for image_b64 in result['images']:
-                                    st.image(image_b64, caption="Property Image", use_column_width=True)
-                else:
-                    st.error("No property found with the given criteria.")
-            except Exception as e:
-                st.error(f"An error occurred during the search: {e}")
+        submit = st.form_submit_button("Search")
 
-    return search_results  # Return the list of search results
+    if submit:
+        # Translate UI option to sort parameter
+        sort_option = None
+        if sort_by_price == "Ascending":
+            sort_option = 'asc'
+        elif sort_by_price == "Descending":
+            sort_option = 'desc'
 
+        # Call the backend search function with sorting option
+        search_results = search_property(city=city, state=state, property_type=property_type.lower(), address=address, custom_id=custom_id, sort_by_price=sort_option)
 
-def filter_property_ui(properties):
-    """
-    UI for filtering properties based on advanced criteria such as price range, number of bedrooms, and bathrooms.
+        # Filter duplicates based on custom_id
+        unique_properties = {}
+        for property in search_results:
+            custom_id = property.get('custom_id')
+            if custom_id not in unique_properties:
+                unique_properties[custom_id] = property
 
-    :param properties: List of property dictionaries to be filtered.
-    """
-    st.subheader("🔍 Filter Properties")
-    with st.form(key='filter_property_form'):
-        # Advanced filters
-        st.write("Specify Filter Criteria:")
-        min_price = st.number_input("Minimum Price ($)", min_value=0, value=0, step=10000, format="%d")
-        max_price = st.number_input("Maximum Price ($)", min_value=0, value=1000000, step=10000, format="%d")
-        min_bedrooms = st.number_input("Minimum Bedrooms", min_value=0, value=0, step=1)
-        max_bedrooms = st.number_input("Maximum Bedrooms", min_value=0, value=10, step=1)
-        min_bathrooms = st.number_input("Minimum Bathrooms", min_value=0.0, value=0.0, step=0.5)
-        max_bathrooms = st.number_input("Maximum Bathrooms", min_value=0.0, value=10.0, step=0.5)
+        # Use the values from unique_properties, which are now unique
+        unique_search_results = list(unique_properties.values())
 
-        submit_filter = st.form_submit_button(label='Apply Filters')
+        if unique_search_results:
+            st.success(f"Found {len(unique_search_results)} unique properties.")
+            for property in unique_search_results:
+                st.json(property)  # Display property details as JSON
 
-        if submit_filter:
-            # Apply filters to the provided properties list
-            filtered_results = filter_property(
-                properties,
-                min_price=min_price,
-                max_price=max_price,
-                min_bedrooms=min_bedrooms,
-                max_bedrooms=max_bedrooms,
-                min_bathrooms=min_bathrooms,
-                max_bathrooms=max_bathrooms
-            )
-
-            # Display filtered results
-            if filtered_results:
-                st.write("### Filtered Properties Found:")
-                for result in filtered_results:
-                    with st.expander(f"See details for {result.get('address', 'No Details')}"):
-                        st.json(result)  # Display the property details in JSON format
-                        if result.get('images'):
-                            for image_b64 in result['images']:
-                                st.image(image_b64, caption="Property Image", use_column_width=True)
-            else:
-                st.error("No properties found with the given filters.")
+                # Display images if available, ensuring each image is unique
+                images = list(set(property.get('images', [])))
+                for img in images:
+                    display_image_in_base64(img)
+        else:
+            st.warning("No properties found matching the criteria.")
 
 
 def update_property_ui():
@@ -311,6 +304,9 @@ def main():
     # Safely check if the user is authenticated, defaulting to False if the key doesn't exist
     is_authenticated = st.session_state.get("authenticated", False)
 
+    # Display logo after authentication
+    display_logo(r"C:\Users\nguye\OneDrive\Desktop\homepage.jpg")
+
     if is_authenticated:
         # User is authenticated, show property management operations
         st.sidebar.title("🏠 Property Management")
@@ -322,15 +318,11 @@ def main():
         elif operation == "Search Property":
             search_results = search_property_ui()  # Modify this function to return search results
             st.session_state['search_results'] = search_results  # Store search results in session state
-        elif operation == "Filter Properties":
-            if 'search_results' in st.session_state:
-                filter_property_ui(st.session_state['search_results'])  # Apply filters to the stored search results
-            else:
-                st.error("Please perform a search before applying filters.")
         elif operation == "Update Property":
             update_property_ui()
         elif operation == "Delete Property":
             delete_property_ui()
+
     else:
         # User is not authenticated, show login and optionally registration UI
         login_ui()
